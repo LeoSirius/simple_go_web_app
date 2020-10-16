@@ -3,9 +3,12 @@
 这篇文章是官方教程[Writing Web Applications](https://golang.org/doc/articles/wiki/)的意译（说是意译，因为不是逐字逐句翻译的，且加入了我自己的理解）
 
 [导言](#导言)
+
 [开始](#开始)
+
 [数据结构](#数据结构)
-[`net/http`介绍](#`net/http`介绍)
+
+[net/http介绍](#net/http介绍)
 
 ## 导言
 
@@ -98,5 +101,46 @@ $ cat TestPage.txt
 This is a sample page.
 ```
 
-## `net/http`介绍
+## net/http介绍
+
+先来看一个简单的demo
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	// 如果浏览器输入127.0.0.1:8888/go
+	// 那么r.URL的值是 “/go”
+	// 这里切片去掉了最前面的"/"
+	fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
+}
+
+func main() {
+	http.HandleFunc("/", handler)
+
+	// ListenAndServe返回的话，必然是error
+	log.Fatal(http.ListenAndServe(":8888", nil))
+}
+```
+
+访问`127.0.0.1:8888/go`，可以看到返回的`Hi there, I love go!`
+
+## 使用net/http展示wiki页面
+
+回到`wiki.go`中。在import中加上`net/http`
+
+```go
+import (
+	"fmt"
+	"io/ioutil"
+	"net/http"
+)
+```
+
 
