@@ -1,3 +1,3 @@
-module github.com/LeoSirius/gorpc
+module simple_go_web_app
 
 go 1.15
