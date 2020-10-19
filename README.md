@@ -10,6 +10,16 @@
 
 [`net/http`介绍](#nethttp介绍)
 
+[使用`net/http`展示wiki页面](#使用nethttp展示wiki页面)
+
+[编辑Page](#编辑Page)
+
+[`html/template`包](#htmltemplate包)
+
+[处理不存在的页面](#处理不存在的页面)
+
+[保存页面](#保存页面)
+
 ## 导言
 
 本教程覆盖的内容：
@@ -133,6 +143,14 @@ func main() {
 
 ## 使用net/http展示wiki页面
 
+url设计：
+
+- `/view/`展示wikis
+- `/edit/`编辑wiki
+- `/save/`保存编辑好的wiki
+
+我们会为这三个路径各自添加一个handler。这里先写`viewHandler`
+
 回到`wiki.go`中。在import中加上`net/http`
 
 ```go
@@ -143,4 +161,145 @@ import (
 )
 ```
 
+然后创建一个视图handler，处理url为`/view/`的情况。
 
+```go
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+    title := r.URL.Path[len("/view/"):]
+    p, _ := loadPage(title)
+    fmt.Fprintf(w, "<h1>%s</h1><div>%s</div>", p.Title, p.Body)
+}
+```
+
+在main中注册这个handler
+
+```go
+func main() {
+    http.HandleFunc("/view/", viewHandler)
+    log.Fatal(http.ListenAndServe(":8888", nil))
+}
+```
+
+然后在浏览器访问`http://39.106.229.224:8888/view/TestPage`。就可以看到我们在第一步中添加的测试Page。
+
+## 编辑Page
+
+为edit添加handler
+
+```go
+func editHandler(w http.ResponseWriter, r *http.Request) {
+    title := r.URL.Path[len("/edit/"):]
+    p, err := loadPage(title)
+    if err != nil {
+        p = &Page{Title: title}
+    }
+    fmt.Fprintf(w, "<h1>Editing %s</h1>"+
+        "<form action=\"/save/%s\" method=\"POST\">"+
+        "<textarea name=\"body\">%s</textarea><br>"+
+        "<input type=\"submit\" value=\"Save\">"+
+        "</form>",
+        p.Title, p.Title, p.Body)
+}
+```
+
+然后在main中注册`http.HandleFunc("/edit/", editHandler)`
+
+## `html/template`包
+
+前面我们的html是直接用字符串写在go代码中的，这样修改模板后需要重新编译一遍go代码。使用`html/template`可以把html文件和go源码分开。
+
+首先import中加入`"html/template"`。然后创建一个`edit.html`，把之前写在go源码中的内容写到html里
+
+```html
+<h1>Editing {{.Title}}</h1>
+
+<form action="/save/{{.Title}}" method="POST">
+
+<!-- Body是[]byte类型，这里用printf "%s"将其转换成字符串 -->
+<div><textarea name="body" rows="20" cols="80">{{printf "%s" .Body}}</textarea></div>
+<div><input type="submit" value="Save"></div>
+</form>
+```
+
+修改editHandler函数
+
+```go
+func editHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/edit/"):]
+	p, err := loadPage(title)
+
+	// 如果用户输入的是新的title，loadPage会返回err，这里用用户新输入的title创建一个新的Page
+	if err != nil {
+		p = &Page{Title: title}
+	}
+
+    // ParseFiles读取”edit.html“文件并返回一个模板
+    t, _ := template.ParseFiles("edit.html")
+    // Execute会把模板写到ResponseWriter里
+	t.Execute(w, p)
+}
+```
+
+然后把之前viewHandler也改成使用模板，创建`view.html`
+
+```html
+<h1>{{.Title}}</h1>
+
+<p>[<a href="/edit/{{.Title}}">edit</a>]</p>
+
+<div>{{printf "%s" .Body}}</div>
+```
+
+然后修改`viewHandler`
+
+```go
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/view/"):]
+	p, _ := loadPage(title)
+	t, _ := template.ParseFiles("view.html")
+	t.Execute(w, p)
+}
+```
+
+`viewHandler`和`editHandler`都有处理模板的共同逻辑，可以把这块抽出来单独写个函数`renderTemplate`
+
+```go
+func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
+	t, _ := template.ParseFiles(tmpl + ".html")
+	t.Execute(w, p)
+}
+
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/view/"):]
+	p, _ := loadPage(title)
+	renderTemplate(w, "view", p)
+}
+
+func editHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/edit/"):]
+	p, err := loadPage(title)
+	// 如果用户输入的是新的title，loadPage会返回err，这里用用户新输入的title创建一个新的Page
+	if err != nil {
+		p = &Page{Title: title}
+	}
+	renderTemplate(w, "edit", p)
+}
+```
+
+## 处理不存在的页面
+
+如果用户输入`view/ANonExistsPage`，我们将其重定向到edit页面让用户编辑新的Page
+
+```go
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/view/"):]
+	p, err := loadPage(title)
+	if err != nil {
+		http.Redirect(w, r, "/edit/" + title, http.StatusFound)
+		return
+	}
+	renderTemplate(w, "view", p)
+}
+```
+
+## 保存页面

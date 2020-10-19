@@ -1,8 +1,10 @@
 package main
 
 import (
-	"fmt"
+	// "fmt"
+	"html/template"
 	"io/ioutil"
+	"log"
 	"net/http"
 )
 
@@ -27,12 +29,33 @@ func loadPage(title string) (*Page, error) {
 	return &Page{Title:title, Body: body}, nil
 }
 
-func main() {
-	// 创建一个测试的Page p1，然后调用save方法保存到磁盘
-	p1 := &Page{Title: "TestPage", Body: []byte("This is a sample page.")}
-	p1.save()
+func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
+	t, _ := template.ParseFiles(tmpl + ".html")
+	t.Execute(w, p)
+}
 
-	// 用loadPage读取刚才保存的page，然后打印内容
-	p2, _ := loadPage("TestPage")
-	fmt.Println(string(p2.Body))
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/view/"):]
+	p, err := loadPage(title)
+	if err != nil {
+		http.Redirect(w, r, "/edit/" + title, http.StatusFound)
+		return
+	}
+	renderTemplate(w, "view", p)
+}
+
+func editHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/edit/"):]
+	p, err := loadPage(title)
+	// 如果用户输入的是新的title，loadPage会返回err，这里用用户新输入的title创建一个新的Page
+	if err != nil {
+		p = &Page{Title: title}
+	}
+	renderTemplate(w, "edit", p)
+}
+
+func main() {
+	http.HandleFunc("/view/", viewHandler)
+	http.HandleFunc("/edit/", editHandler)
+	log.Fatal(http.ListenAndServe(":8888", nil))
 }
