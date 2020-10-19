@@ -8,7 +8,7 @@
 
 [数据结构](#数据结构)
 
-[net/http介绍](#net%2Fhttp介绍)
+[`net/http`介绍](#nethttp介绍)
 
 ## 导言
 
@@ -101,7 +101,7 @@ $ cat TestPage.txt
 This is a sample page.
 ```
 
-## net/http介绍
+## `net/http`介绍
 
 先来看一个简单的demo
 
