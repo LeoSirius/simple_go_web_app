@@ -20,6 +20,14 @@
 
 [保存页面](#保存页面)
 
+[错误处理](#错误处理)
+
+[模板缓存](#模板缓存)
+
+[验证](#验证)
+
+[函数字面值和闭包](#函数字面值和闭包)
+
 ## 导言
 
 本教程覆盖的内容：
@@ -303,3 +311,162 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 ```
 
 ## 保存页面
+
+类似前面的`editHandler`和`viewHandler`，我们为保存添加一个处理函数。
+
+```go
+func saveHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/save/"):]
+	body := r.FormValue("body")
+	p := &Page{Title: title, Body: []byte(body)}
+	p.save()
+	http.Redirect(w, r, "/view/" + title, http.StatusFound)
+}
+```
+
+然后在main中注册`http.HandleFunc("/save/", saveHandler)`
+
+## 错误处理
+
+在`renderTemplate`和`saveHandler`都加上对错误的处理
+
+http.Error()会返回一个response
+
+```go
+func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
+	t, err := template.ParseFiles(tmpl + ".html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	err = t.Execute(w, p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+```
+
+```go
+func saveHandler(w http.ResponseWriter, r *http.Request) {
+	title := r.URL.Path[len("/save/"):]
+	body := r.FormValue("body")
+	p := &Page{Title: title, Body: []byte(body)}
+	err := p.save()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/view/" + title, http.StatusFound)
+}
+```
+
+## 模板缓存
+
+目前为止，我们每刷新一次view或edit页面，对应的模板都要重新加载。`template.Must`可以在程序开始执行时一次性的把模板都加载出来。
+
+在全局位置加上Must
+
+```go
+var templates = template.Must(template.ParseFiles("edit.html", "view.html"))
+```
+
+再修改一下`renderTemplate`函数
+
+```go
+func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
+	err := templates.ExecuteTemplate(w, tmpl + ".html", p)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+```
+
+## 验证
+
+到目前位置，我们直接把用户在url中输入的路径来创建或修改文件，这是非常危险的。现在用`regexp`对用户输入的url进行验证。
+
+先创建一个全局变量
+
+```go
+var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)$")
+```
+
+正则表达式不在这里详细介绍。大概解释一下，`"^/(edit|save|view)/([a-zA-Z0-9]+)$"`的意思就是url的第一部分必须是`edit|save|view`其实中之一，url的第二部分必须是`[a-zA-Z0-9]`中的多个字符。这样就把path限制在了当前目录下。
+
+在`viewHandler`, `editHandler`和`saveHandler`中都有从URL中提取title的部分，把他们做成一个公共函数。然后在三个handlers中使用这个函数。
+
+```go
+func getTitle(w http.ResponseWriter, r *http.Request) (string, error) {
+	m := validPath.FindStringSubmatch(r.URL.Path)
+	if m == nil {
+		http.NotFound(w, r)
+		return "", errors.New("invalid Page Title")
+	}
+	// url输入localhost:8888/view/hello
+	// m的内容为下面，可见m[2]就是title
+	// [/view/hello view hello]
+	return m[2], nil
+}
+
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	title, err := getTitle(w, r)
+	if err != nil {
+		return
+	}
+
+	p, err := loadPage(title)
+	if err != nil {
+		http.Redirect(w, r, "/edit/" + title, http.StatusFound)
+		return
+	}
+	renderTemplate(w, "view", p)
+}
+
+func editHandler(w http.ResponseWriter, r *http.Request) {
+	title, err := getTitle(w, r)
+	if err != nil {
+		return
+	}
+
+	p, err := loadPage(title)
+	// 如果用户输入的是新的title，loadPage会返回err，这里用用户新输入的title创建一个新的Page
+	if err != nil {
+		p = &Page{Title: title}
+	}
+	renderTemplate(w, "edit", p)
+}
+
+func saveHandler(w http.ResponseWriter, r *http.Request) {
+	title, err := getTitle(w, r)
+	if err != nil {
+		return
+	}
+
+	body := r.FormValue("body")
+	p := &Page{Title: title, Body: []byte(body)}
+	err = p.save()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/view/" + title, http.StatusFound)
+}
+```
+
+## 函数字面值和闭包
+
+`viewHandler`, `editHandler`和`saveHandler`都有共同的逻辑，这里再抽象一下，用高阶函数和闭包
+
+首先写一个创建handler的函数。这个函数的参数是一个函数，并且返回这个函数。在返回的函数里，会调用传进来的函数。
+
+```go
+func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m := validPath.FindStringSubmatch(r.URL.Path)
+		if m == nil {
+			http.NotFound(w, r)
+			return
+		}
+		fn(w, r, m[2])
+	}
+}
+```
