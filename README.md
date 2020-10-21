@@ -456,7 +456,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 
 `viewHandler`, `editHandler`和`saveHandler`都有共同的逻辑，这里再抽象一下，用高阶函数和闭包
 
-首先写一个创建handler的函数。这个函数的参数是一个函数，并且返回这个函数。在返回的函数里，会调用传进来的函数。
+首先写一个创建handler函数的函数。这个函数的参数是一个函数，并且返回这个函数。在返回的函数里，会调用传进来的函数。
 
 ```go
 func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
@@ -465,8 +465,55 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.Handl
 		if m == nil {
 			http.NotFound(w, r)
 			return
-		}
+        }
+        // m[2] 就是正则匹配出的title
 		fn(w, r, m[2])
 	}
 }
 ```
+
+在修改makeHandler里调用的fn，也即前面的三个handler函数。直接把title作为第三个参数传进来。
+
+```go
+func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
+	p, err := loadPage(title)
+	if err != nil {
+		http.Redirect(w, r, "/edit/" + title, http.StatusFound)
+		return
+	}
+	renderTemplate(w, "view", p)
+}
+
+func editHandler(w http.ResponseWriter, r *http.Request, title string) {
+	p, err := loadPage(title)
+	// 如果用户输入的是新的title，loadPage会返回err，这里用用户新输入的title创建一个新的Page
+	if err != nil {
+		p = &Page{Title: title}
+	}
+	renderTemplate(w, "edit", p)
+}
+
+func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
+	body := r.FormValue("body")
+	p := &Page{Title: title, Body: []byte(body)}
+	err := p.save()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/view/" + title, http.StatusFound)
+}
+```
+
+最后在main中使用makeHandler
+
+```go
+func main() {
+	http.HandleFunc("/view/", makeHandler(viewHandler))
+	http.HandleFunc("/edit/", makeHandler(editHandler))
+	http.HandleFunc("/save/", makeHandler(saveHandler))
+	log.Fatal(http.ListenAndServe(":8888", nil))
+}
+```
+
+到这里就全部结束啦
